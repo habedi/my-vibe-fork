@@ -244,6 +244,7 @@ Deprecated datasets will remain available, but their benchmark results will not 
 | [CAGRA](https://github.com/rapidsai/cuvs) | 26.04.00 |
 | [GGNN](https://github.com/cgtuebingen/ggnn) | 0.9 |
 | [Glass](https://github.com/zilliztech/pyglass) | git+d2296ec |
+| [Hann](https://github.com/habedi/hann) | 0.8.0 |
 | [HNSW](https://github.com/nmslib/hnswlib) | 0.8.0 |
 | [HNSW-RaBitQ](https://github.com/VectorDB-NTU/RaBitQ-Library) | git+5ea4df0 |
 | [IVF (Faiss)](https://github.com/facebookresearch/faiss) | 1.14.3 |
