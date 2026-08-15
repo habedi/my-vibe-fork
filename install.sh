@@ -73,9 +73,14 @@ build_singularity_image() {
 
     if [ ! -e "$image_dir/${name}.sif" ] || [ "$force_build" = "true" ]; then
         cp "$1/image.def" "$build_images_dir/${name}.def"
+        # Stage the algorithm directory so the def's %files section can copy
+        # extra files (sources are resolved relative to the build directory).
+        rm -rf "$build_images_dir/${name}.files"
+        cp -r "$1" "$build_images_dir/${name}.files"
         pushd "$build_images_dir" >/dev/null
         singularity build -F "${name}.sif" "${name}.def"
         popd >/dev/null
+        rm -rf "$build_images_dir/${name}.files"
         if [ "$build_images_dir" != "$image_dir" ]; then
             mv "$build_images_dir/${name}.sif" "$image_dir/${name}.sif"
         fi
@@ -99,6 +104,7 @@ clean_up() {
     ARG=$?
     rm -f "$build_images_dir/environment.yml"
     find "$build_images_dir" -maxdepth 1 -name "*.def" -type f -exec rm {} +
+    find "$build_images_dir" -maxdepth 1 -name "*.files" -type d -exec rm -rf {} +
     exit $ARG
 }
 trap clean_up EXIT

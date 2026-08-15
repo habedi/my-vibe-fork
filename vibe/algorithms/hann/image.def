@@ -1,0 +1,38 @@
+Bootstrap: localimage
+From: base.sif
+
+# install.sh stages the algorithm directory as <name>.files next to this def,
+# which is where the %files sources below resolve from.
+
+%files
+  hann.files/bridge.go /opt/hann/src/bridge.go
+  hann.files/go.mod /opt/hann/src/go.mod
+
+%post
+  # The hann release to benchmark. Bump this to test a newer version.
+  HANN_REF=v0.8.0
+  GO_VERSION=1.26.5
+
+  case "$(uname -m)" in
+    x86_64) go_arch=amd64 ;;
+    aarch64|arm64) go_arch=arm64 ;;
+    *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+  esac
+
+  curl -fL --retry 5 --retry-all-errors -o /tmp/go.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz"
+  tar -C /usr/local -xzf /tmp/go.tar.gz
+  rm /tmp/go.tar.gz
+  export PATH=/usr/local/go/bin:$PATH
+
+  # Build the c-shared bridge against the pinned hann release, and install the
+  # library outside every bind-mounted path (the vibe repository and the home
+  # directory are mounted at runtime), where module.py expects to find it.
+  cd /opt/hann/src
+  git clone https://github.com/habedi/hann hann-src
+  git -C hann-src checkout "$HANN_REF"
+  go mod tidy
+  CGO_ENABLED=1 go build -buildmode=c-shared -o /opt/hann/libhann_bridge.so .
+
+  go clean -modcache
+  cd /
+  rm -rf /opt/hann/src /usr/local/go /root/go /root/.cache/go-build
