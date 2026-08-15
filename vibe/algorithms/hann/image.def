@@ -10,7 +10,7 @@ From: base.sif
 
 %post
   # The Hann release to benchmark. Bump this to test a newer version.
-  HANN_REF=v0.8.2
+  HANN_REF=v0.8.3
   GO_VERSION=1.26.5
 
   case "$(uname -m)" in

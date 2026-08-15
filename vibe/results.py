@@ -62,6 +62,10 @@ def build_result_filepath(
         d.append(definition.algorithm + suffix)
         index_parameters = re.sub(r"\W+", "_", json.dumps(definition.arguments, sort_keys=True)).strip("_")
         search_parameters = re.sub(r"\W+", "_", json.dumps(query_arguments, sort_keys=True)).strip("_")
+        if not search_parameters:
+            # An algorithm without query arguments still needs a non-empty
+            # HDF5 group name.
+            search_parameters = "default"
         d.append(index_parameters + ".hdf5")
     return os.path.join(*d), search_parameters
 
