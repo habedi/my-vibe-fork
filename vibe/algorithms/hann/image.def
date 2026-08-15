@@ -9,8 +9,8 @@ From: base.sif
   hann.files/go.mod /opt/hann/src/go.mod
 
 %post
-  # The hann release to benchmark. Bump this to test a newer version.
-  HANN_REF=v0.8.0
+  # The Hann release to benchmark. Bump this to test a newer version.
+  HANN_REF=v0.8.2
   GO_VERSION=1.26.5
 
   case "$(uname -m)" in
@@ -24,7 +24,7 @@ From: base.sif
   rm /tmp/go.tar.gz
   export PATH=/usr/local/go/bin:$PATH
 
-  # Build the c-shared bridge against the pinned hann release, and install the
+  # Build the c-shared bridge against the pinned Hann release, and install the
   # library outside every bind-mounted path (the vibe repository and the home
   # directory are mounted at runtime), where module.py expects to find it.
   cd /opt/hann/src

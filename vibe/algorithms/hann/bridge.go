@@ -1,7 +1,7 @@
-// Package main builds a c-shared library that exposes the hann HNSW index
-// through a small C ABI, so the Python wrapper can drive it with ctypes.
-// Go objects never cross the boundary: each index lives in a mutex-guarded
-// map and is referred to by an int64 handle.
+// Package main builds a c-shared library that exposes the Hann indexes
+// (HNSW, PQIVF, and RPT) through a small C ABI, so the Python wrapper can
+// drive them with ctypes. Go objects never cross the boundary: each index
+// lives in a mutex-guarded map and is referred to by an int64 handle.
 package main
 
 /*
@@ -16,10 +16,12 @@ import (
 
 	"github.com/habedi/hann/core"
 	"github.com/habedi/hann/hnsw"
+	"github.com/habedi/hann/pqivf"
+	"github.com/habedi/hann/rpt"
 )
 
 type indexEntry struct {
-	index *hnsw.Index
+	index core.Index
 	dim   int
 	count int // running count of inserted vectors, used to assign ids
 }
@@ -36,6 +38,26 @@ func getEntry(handle int64) *indexEntry {
 	return registry[handle]
 }
 
+func putEntry(index core.Index, dim int) C.int64_t {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	h := nextHandle
+	nextHandle++
+	registry[h] = &indexEntry{index: index, dim: dim}
+	return C.int64_t(h)
+}
+
+func parseMetric(metric *C.char) (core.Metric, bool) {
+	switch strings.ToLower(C.GoString(metric)) {
+	case "euclidean":
+		return core.Euclidean, true
+	case "cosine":
+		return core.Cosine, true
+	default:
+		return core.Metric{}, false
+	}
+}
+
 // hann_hnsw_new creates an HNSW index and returns a handle to it, or -1 on
 // error. The metric string is either "euclidean" or "cosine".
 //
@@ -47,13 +69,8 @@ func hann_hnsw_new(dim, m, efConstruction C.int64_t, metric *C.char) (handle C.i
 		}
 	}()
 
-	var coreMetric core.Metric
-	switch strings.ToLower(C.GoString(metric)) {
-	case "euclidean":
-		coreMetric = core.Euclidean
-	case "cosine":
-		coreMetric = core.Cosine
-	default:
+	coreMetric, ok := parseMetric(metric)
+	if !ok {
 		return -1
 	}
 
@@ -65,21 +82,88 @@ func hann_hnsw_new(dim, m, efConstruction C.int64_t, metric *C.char) (handle C.i
 	if err != nil {
 		return -1
 	}
-
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	h := nextHandle
-	nextHandle++
-	registry[h] = &indexEntry{index: index, dim: int(dim)}
-	return C.int64_t(h)
+	return putEntry(index, int(dim))
 }
 
-// hann_hnsw_add_batch adds n vectors of the given dimension, laid out
-// row-major in flat, assigning ids sequentially from the running count of
-// the index. It returns the number of vectors added, or -1 on error.
+// hann_pqivf_new creates a PQIVF index and returns a handle to it, or -1 on
+// error. The metric is always Euclidean, so there is no metric argument. A
+// zero for coarseK, numSubquantizers, pqK, kMeansIters, or candidateClusters
+// keeps the library default for that parameter.
 //
-//export hann_hnsw_add_batch
-func hann_hnsw_add_batch(handle C.int64_t, flat *C.float, n, dim C.int64_t) (added C.int64_t) {
+//export hann_pqivf_new
+func hann_pqivf_new(dim, coarseK, numSubquantizers, pqK, kMeansIters, candidateClusters C.int64_t) (handle C.int64_t) {
+	defer func() {
+		if r := recover(); r != nil {
+			handle = -1
+		}
+	}()
+
+	var opts []pqivf.Option
+	if coarseK > 0 {
+		opts = append(opts, pqivf.WithCoarseK(int(coarseK)))
+	}
+	if numSubquantizers > 0 {
+		opts = append(opts, pqivf.WithNumSubquantizers(int(numSubquantizers)))
+	}
+	if pqK > 0 {
+		opts = append(opts, pqivf.WithPQK(int(pqK)))
+	}
+	if kMeansIters > 0 {
+		opts = append(opts, pqivf.WithKMeansIters(int(kMeansIters)))
+	}
+	if candidateClusters > 0 {
+		opts = append(opts, pqivf.WithCandidateClusters(int(candidateClusters)))
+	}
+
+	index, err := pqivf.New(int(dim), opts...)
+	if err != nil {
+		return -1
+	}
+	return putEntry(index, int(dim))
+}
+
+// hann_rpt_new creates an RPT index and returns a handle to it, or -1 on
+// error. The metric string is either "euclidean" or "cosine". A zero for
+// leafCapacity or candidateProjections, and a negative probeMargin, keep the
+// library default for that parameter.
+//
+//export hann_rpt_new
+func hann_rpt_new(dim, leafCapacity, candidateProjections C.int64_t, probeMargin C.double, metric *C.char) (handle C.int64_t) {
+	defer func() {
+		if r := recover(); r != nil {
+			handle = -1
+		}
+	}()
+
+	coreMetric, ok := parseMetric(metric)
+	if !ok {
+		return -1
+	}
+
+	opts := []rpt.Option{rpt.WithMetric(coreMetric)}
+	if leafCapacity > 0 {
+		opts = append(opts, rpt.WithLeafCapacity(int(leafCapacity)))
+	}
+	if candidateProjections > 0 {
+		opts = append(opts, rpt.WithCandidateProjections(int(candidateProjections)))
+	}
+	if probeMargin >= 0 {
+		opts = append(opts, rpt.WithProbeMargin(float64(probeMargin)))
+	}
+
+	index, err := rpt.New(int(dim), opts...)
+	if err != nil {
+		return -1
+	}
+	return putEntry(index, int(dim))
+}
+
+// hann_add_batch adds n vectors of the given dimension, laid out row-major
+// in flat, assigning ids sequentially from the running count of the index.
+// It returns the number of vectors added, or -1 on error.
+//
+//export hann_add_batch
+func hann_add_batch(handle C.int64_t, flat *C.float, n, dim C.int64_t) (added C.int64_t) {
 	defer func() {
 		if r := recover(); r != nil {
 			added = -1
@@ -117,8 +201,34 @@ func hann_hnsw_add_batch(handle C.int64_t, flat *C.float, n, dim C.int64_t) (add
 	return n
 }
 
-// hann_hnsw_set_ef changes the search breadth of the index. It returns 0 on
-// success and -1 on error.
+// hann_train trains the index behind the handle, which must implement
+// core.Trainer. It returns 0 on success and -1 on error.
+//
+//export hann_train
+func hann_train(handle C.int64_t) (status C.int64_t) {
+	defer func() {
+		if r := recover(); r != nil {
+			status = -1
+		}
+	}()
+
+	entry := getEntry(int64(handle))
+	if entry == nil {
+		return -1
+	}
+	trainer, ok := entry.index.(core.Trainer)
+	if !ok {
+		return -1
+	}
+	if err := trainer.Train(); err != nil {
+		return -1
+	}
+	return 0
+}
+
+// hann_hnsw_set_ef changes the search breadth of an HNSW index. It returns 0
+// on success and -1 on error, which includes a handle that does not refer to
+// an HNSW index.
 //
 //export hann_hnsw_set_ef
 func hann_hnsw_set_ef(handle, ef C.int64_t) (status C.int64_t) {
@@ -132,18 +242,22 @@ func hann_hnsw_set_ef(handle, ef C.int64_t) (status C.int64_t) {
 	if entry == nil {
 		return -1
 	}
-	if err := entry.index.SetEf(int(ef)); err != nil {
+	index, ok := entry.index.(*hnsw.Index)
+	if !ok {
+		return -1
+	}
+	if err := index.SetEf(int(ef)); err != nil {
 		return -1
 	}
 	return 0
 }
 
-// hann_hnsw_search searches the index for the k nearest neighbors of the
-// query and writes their ids into out, which must have room for k int32
-// values. It returns the number of ids written, or -1 on error.
+// hann_search searches the index for the k nearest neighbors of the query
+// and writes their ids into out, which must have room for k int32 values.
+// It returns the number of ids written, or -1 on error.
 //
-//export hann_hnsw_search
-func hann_hnsw_search(handle C.int64_t, query *C.float, dim, k C.int64_t, out *C.int32_t) (found C.int64_t) {
+//export hann_search
+func hann_search(handle C.int64_t, query *C.float, dim, k C.int64_t, out *C.int32_t) (found C.int64_t) {
 	defer func() {
 		if r := recover(); r != nil {
 			found = -1
@@ -177,11 +291,11 @@ func hann_hnsw_search(handle C.int64_t, query *C.float, dim, k C.int64_t, out *C
 	return C.int64_t(written)
 }
 
-// hann_hnsw_free releases the index behind the handle. Freeing an unknown
-// handle is a no-op.
+// hann_free releases the index behind the handle. Freeing an unknown handle
+// is a no-op.
 //
-//export hann_hnsw_free
-func hann_hnsw_free(handle C.int64_t) {
+//export hann_free
+func hann_free(handle C.int64_t) {
 	defer func() { _ = recover() }()
 	registryMu.Lock()
 	defer registryMu.Unlock()

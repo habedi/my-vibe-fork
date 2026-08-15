@@ -1,11 +1,11 @@
 float:
   any:
   - base_args: ['@metric']
-    constructor: Hann
+    constructor: HannHNSW
     disabled: false
     singularity_image: hann
     module: vibe.algorithms.hann
-    name: hann
+    name: hnsw(hann)
     run_groups:
       base:
         args:
@@ -13,3 +13,31 @@ float:
           efConstruction: [200, 400]
         query_args:
           ef: [10, 20, 40, 80, 120, 200, 400, 600, 800]
+  - base_args: ['@metric']
+    constructor: HannPQIVF
+    disabled: false
+    singularity_image: hann
+    module: vibe.algorithms.hann
+    name: pqivf(hann)
+    run_groups:
+      # The candidate cluster count is a construction-time parameter in Hann,
+      # so it lives in args and every combination is a separate build.
+      base:
+        args:
+          coarseK: [64, 256, 1024]
+          candidateClusters: [1, 2, 4, 8, 16, 32]
+  - base_args: ['@metric']
+    constructor: HannRPT
+    disabled: false
+    singularity_image: hann
+    module: vibe.algorithms.hann
+    name: rpt(hann)
+    run_groups:
+      # The probe margin is a construction-time parameter in Hann, so it
+      # lives in args and every combination is a separate build. It is a
+      # fraction of the projection value spread at each tree node, which
+      # needs Hann v0.8.1 or newer (the HANN_REF pinned in image.def).
+      base:
+        args:
+          leafCapacity: [32, 128]
+          probeMargin: [0.5, 1.0, 1.5, 2.0, 3.0]
